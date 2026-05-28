@@ -787,7 +787,7 @@ def analyze_statement(df: pd.DataFrame) -> dict:
     ]
 
     # Список внутрішніх переказів для ігнорування
-    INTERNAL_PATTERNS = [
+     = [
         r"переказ між власними рахунками",
         r"переказ оборотніх коштів",
         r"переказ грошей на рахунок у іншому банку",
@@ -796,13 +796,51 @@ def analyze_statement(df: pd.DataFrame) -> dict:
         r"переказ прибутку"
     ]
 
+  # ── 5.5 Б) Аналіз призначень платежів ────────────────────────────────
+    REQUIRED_PATTERNS = [
+        (r"рах(?:унок)?[\s.#№]*[\d\-/]+", "номер рахунку"),
+        (r"рах\.?\s*№?\s*[\d\-/]+", "номер рахунку (скорочення)"),
+        (r"дог(?:овір|овора)?[\s.#№]*[\d\-/]+", "номер договору"),
+        (r"дог\.?\s*№?\s*[\d\-/]+", "номер договору (скорочення)"),
+        (r"акт[\s.#№]*[\d\-/]+", "номер акта"),
+        (r"вн[\s.#№]*[\d\-/]+", "видаткова накладна"),
+        (r"видаткова накладна", "видаткова накладна (повна форма)"),
+        (r"№\s*[\d\-/]+", "будь-який номер документа"),
+        (r"\d{2}[./-]\d{2}[./-]\d{4}", "дата документа"),
+        (r"\d{2}[./-]\d{2}[./-]\d{2}(?!\d)", "дата документа (коротка)"),
+    ]
+
+    BLUR_PHRASES = [
+        r"^оплата за товар$", r"^за послуги$", r"^аванс$",
+        r"^оплата$", r"^розрахунок$", r"^за товар$",
+        r"^оплата послуги$", r"^оплата товарів$",
+        r"^перерахування коштів$", r"^перерахування$",
+    ]
+
+    HIGH_RISK_PHRASES = [
+        r"виведення коштів", r"повернення поворотн",
+        r"нерозподілений прибуток", r"особисті кошти",
+        r"матеріальна допомога.*без",
+    ]
+
+    INTERNAL_PATTERNS = [
+        r"переказ між власними рахунками",
+        r"переказ оборотніх коштів",
+        r"переказ грошей на рахунок у іншому банку",
+        r"власні кошти",
+        r"поповнення власного рахунку",
+        r"переказ прибутку",
+        r"покриття за проведені трансакції згідно договору еквайринга",
+        r"еквайринг"
+    ]
+
     payment_risks = []
     if col_purpose_used:
         for idx, row in df.iterrows():
-            # Безпечне отримання значень
-            purpose = str(row[col_purpose_used]) if col_purpose_used in row else ""
-            counterparty = str(row[col_counterparty_used]) if col_counterparty_used in row else ""
-            amount = row.get("_debit", 0) + row.get("_credit", 0)
+            # Безпечне отримання значень без помилки Series/Ambiguous
+            purpose = str(row[col_purpose_used]) if col_purpose_used in row and pd.notna(row[col_purpose_used]) else ""
+            counterparty = str(row[col_counterparty_used]) if col_counterparty_used in row and pd.notna(row[col_counterparty_used]) else ""
+            amount = (row["_debit"] if "_debit" in row else 0) + (row["_credit"] if "_credit" in row else 0)
             norm_p = normalize_text(purpose)
 
             # 1. Фільтрація внутрішніх переказів
@@ -821,7 +859,7 @@ def analyze_statement(df: pd.DataFrame) -> dict:
                 })
                 continue
 
-            # 3. Аналіз за шаблонами (Regex)
+            # 3. Аналіз за шаблонами
             is_blur = any(re.search(pattern, norm_p) for pattern in BLUR_PHRASES)
             has_required = any(re.search(pattern, norm_p) for pattern, _ in REQUIRED_PATTERNS)
             is_high_risk = any(re.search(pattern, norm_p) for pattern in HIGH_RISK_PHRASES)
@@ -859,7 +897,7 @@ def analyze_statement(df: pd.DataFrame) -> dict:
     
     # ── 5.6 В) Аналіз транзитних операцій ────────────────────────────────
     transit_risks = []
-    if col_date and not df["_date"].isna().all():
+    if col_date and "_date" in df.columns and not df["_date"].isna().all():
         daily = df.groupby("_date").agg(
             daily_debit=("_debit", "sum"),
             daily_credit=("_credit", "sum"),
@@ -871,8 +909,8 @@ def analyze_statement(df: pd.DataFrame) -> dict:
             if d <= 0 or c <= 0:
                 continue
             balance_end = c - d
-            # Транзит: кредит ≈ дебет (в межах 5%)
             ratio = min(d, c) / max(d, c) if max(d, c) > 0 else 0
+            
             if ratio >= 0.95 and abs(balance_end) < 0.05 * max(d, c):
                 transit_risks.append({
                     "date": drow["_date"].strftime("%d.%m.%Y") if pd.notna(drow["_date"]) else "?",
