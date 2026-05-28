@@ -25,6 +25,8 @@ import hashlib
 from datetime import datetime, timedelta
 from collections import defaultdict
 import warnings
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 warnings.filterwarnings("ignore")
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -512,6 +514,7 @@ BUSINESS_SCENARIOS = {
 # СЕКЦІЯ 4: ДОПОМІЖНІ ФУНКЦІЇ
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def normalize_text(text: str) -> str:
     """Нормалізація тексту: нижній регістр, очищення спецсимволів."""
     if pd.isna(text) or text is None:
@@ -549,7 +552,8 @@ def safe_float(value) -> float:
     try:
         if pd.isna(value):
             return 0.0
-        cleaned = str(value).replace(" ", "").replace(",", ".").replace("₴", "").strip()
+        cleaned = str(value).replace(" ", "").replace(
+            ",", ".").replace("₴", "").strip()
         return float(cleaned) if cleaned else 0.0
     except (ValueError, TypeError):
         return 0.0
@@ -591,14 +595,21 @@ def analyze_statement(df: pd.DataFrame) -> dict:
     }
 
     # ── 5.1 Виявлення колонок ──────────────────────────────────────────────
-    col_date = find_column(df, ["дата", "date", "дата операції", "дата транзакції", "дата проведення"])
-    col_debit = find_column(df, ["дебет", "debit", "дебет (расход)", "витрати", "списання", "сума дебету", "дебет (витрати)"])
-    col_credit = find_column(df, ["кредит", "credit", "кредит (доход)", "надходження", "зарахування", "сума кредиту", "кредит (надходження)"])
-    col_counterparty = find_column(df, ["контрагент", "counterparty", "назва контрагента", "найменування", "отримувач/відправник", "назва"])
-    col_edrpou = find_column(df, ["окпо", "едрпоу", "єдрпоу", "инн", "іпн", "edrpou", "код контрагента", "код", "рнокпп"])
-    col_purpose = find_column(df, ["призначення", "назначение платежа", "призначення платежу", "purpose", "опис", "деталі", "коментар"])
+    col_date = find_column(
+        df, ["дата", "date", "дата операції", "дата транзакції", "дата проведення"])
+    col_debit = find_column(df, ["дебет", "debit", "дебет (расход)",
+                            "витрати", "списання", "сума дебету", "дебет (витрати)"])
+    col_credit = find_column(df, ["кредит", "credit", "кредит (доход)",
+                             "надходження", "зарахування", "сума кредиту", "кредит (надходження)"])
+    col_counterparty = find_column(
+        df, ["контрагент", "counterparty", "назва контрагента", "найменування", "отримувач/відправник", "назва"])
+    col_edrpou = find_column(
+        df, ["окпо", "едрпоу", "єдрпоу", "инн", "іпн", "edrpou", "код контрагента", "код", "рнокпп"])
+    col_purpose = find_column(df, ["призначення", "назначение платежа",
+                              "призначення платежу", "purpose", "опис", "деталі", "коментар"])
     col_amount = find_column(df, ["сума", "amount", "сума операції", "сумма"])
-    col_dk = find_column(df, ["dk", "дк", "тип", "type", "ознака", "приход/расход", "д/к"])
+    col_dk = find_column(
+        df, ["dk", "дк", "тип", "type", "ознака", "приход/расход", "д/к"])
 
     results["column_mapping"] = {
         "Дата": col_date,
@@ -613,7 +624,8 @@ def analyze_statement(df: pd.DataFrame) -> dict:
 
     # ── 5.2 Стандартизація даних ──────────────────────────────────────────
     if col_date:
-        df["_date"] = pd.to_datetime(df[col_date], errors="coerce", dayfirst=True)
+        df["_date"] = pd.to_datetime(
+            df[col_date], errors="coerce", dayfirst=True)
     else:
         df["_date"] = pd.NaT
 
@@ -622,7 +634,8 @@ def analyze_statement(df: pd.DataFrame) -> dict:
         df["_debit"] = df[col_debit].apply(safe_float)
     elif col_amount and col_dk:
         dk_series = df[col_dk].astype(str).str.lower().str.strip()
-        df["_debit"] = df[col_amount].apply(safe_float) * dk_series.isin(["д", "d", "дебет", "debit", "витрати", "расход", "-", "0"]).astype(float)
+        df["_debit"] = df[col_amount].apply(safe_float) * dk_series.isin(
+            ["д", "d", "дебет", "debit", "витрати", "расход", "-", "0"]).astype(float)
     else:
         df["_debit"] = 0.0
 
@@ -631,7 +644,8 @@ def analyze_statement(df: pd.DataFrame) -> dict:
         df["_credit"] = df[col_credit].apply(safe_float)
     elif col_amount and col_dk:
         dk_series = df[col_dk].astype(str).str.lower().str.strip()
-        df["_credit"] = df[col_amount].apply(safe_float) * dk_series.isin(["к", "k", "кредит", "credit", "надходження", "доход", "+", "1"]).astype(float)
+        df["_credit"] = df[col_amount].apply(safe_float) * dk_series.isin(
+            ["к", "k", "кредит", "credit", "надходження", "доход", "+", "1"]).astype(float)
     else:
         df["_credit"] = 0.0
 
@@ -665,18 +679,22 @@ def analyze_statement(df: pd.DataFrame) -> dict:
         all_purposes = df[col_purpose_used].dropna().tolist()
 
     substance_hits = {}
-    total_weight_possible = sum(cat["weight"] for cat in BUSINESS_CATEGORIES.values())
+    total_weight_possible = sum(cat["weight"]
+                                for cat in BUSINESS_CATEGORIES.values())
     weighted_score = 0
 
     for cat_name, cat_data in BUSINESS_CATEGORIES.items():
-        found_in_debit = any(keyword_match(p, cat_data["keywords"]) for p in debit_purposes)
-        found_in_all = any(keyword_match(p, cat_data["keywords"]) for p in all_purposes)
+        found_in_debit = any(keyword_match(
+            p, cat_data["keywords"]) for p in debit_purposes)
+        found_in_all = any(keyword_match(
+            p, cat_data["keywords"]) for p in all_purposes)
         found = found_in_debit or found_in_all
 
         matching_payments = []
         if col_purpose_used:
             for idx, row in df.iterrows():
-                purpose = str(row.get(col_purpose_used, "")) if col_purpose_used else ""
+                purpose = str(row.get(col_purpose_used, "")
+                              ) if col_purpose_used else ""
                 hits = find_matching_keywords(purpose, cat_data["keywords"])
                 if hits:
                     matching_payments.append({
@@ -701,7 +719,8 @@ def analyze_statement(df: pd.DataFrame) -> dict:
 
     # Підрахунок категорій, де є знахідки
     found_count = sum(1 for v in substance_hits.values() if v["found"])
-    missing_categories = [k for k, v in substance_hits.items() if not v["found"]]
+    missing_categories = [
+        k for k, v in substance_hits.items() if not v["found"]]
     results["missing_categories"] = missing_categories
 
     # Рейтинг субстанції
@@ -744,8 +763,10 @@ def analyze_statement(df: pd.DataFrame) -> dict:
     payment_risks = []
     if col_purpose_used:
         for idx, row in df.iterrows():
-            purpose = str(row.get(col_purpose_used, "")) if col_purpose_used else ""
-            counterparty = str(row.get(col_counterparty_used, "")) if col_counterparty_used else ""
+            purpose = str(row.get(col_purpose_used, "")
+                          ) if col_purpose_used else ""
+            counterparty = str(row.get(col_counterparty_used, "")
+                               ) if col_counterparty_used else ""
             amount = row.get("_debit", 0) + row.get("_credit", 0)
             norm_p = normalize_text(purpose)
 
@@ -762,13 +783,16 @@ def analyze_statement(df: pd.DataFrame) -> dict:
                 continue
 
             # Перевірка на розмиті фрази
-            is_blur = any(re.search(pattern, norm_p) for pattern in BLUR_PHRASES)
+            is_blur = any(re.search(pattern, norm_p)
+                          for pattern in BLUR_PHRASES)
 
             # Перевірка наявності обов'язкових елементів
-            has_required = any(re.search(pattern, norm_p) for pattern, _ in REQUIRED_PATTERNS)
+            has_required = any(re.search(pattern, norm_p)
+                               for pattern, _ in REQUIRED_PATTERNS)
 
             # Перевірка на високоризикові фрази
-            is_high_risk = any(re.search(pattern, norm_p) for pattern in HIGH_RISK_PHRASES)
+            is_high_risk = any(re.search(pattern, norm_p)
+                               for pattern in HIGH_RISK_PHRASES)
 
             if is_high_risk:
                 payment_risks.append({
@@ -843,7 +867,8 @@ def analyze_statement(df: pd.DataFrame) -> dict:
         if col_edrpou_used:
             # По надходженнях
             if total_credit > 0:
-                credit_by_edrpou = df.groupby(df[col_edrpou_used].astype(str))["_credit"].sum()
+                credit_by_edrpou = df.groupby(df[col_edrpou_used].astype(str))[
+                    "_credit"].sum()
                 for edrpou, amount in credit_by_edrpou.items():
                     if edrpou in ("nan", "", "0", "None"):
                         continue
@@ -851,9 +876,11 @@ def analyze_statement(df: pd.DataFrame) -> dict:
                     if share > 70:
                         name = ""
                         if col_counterparty_used:
-                            matches = df[df[col_edrpou_used].astype(str) == edrpou]
+                            matches = df[df[col_edrpou_used].astype(
+                                str) == edrpou]
                             if not matches.empty:
-                                name = str(matches.iloc[0][col_counterparty_used])[:50]
+                                name = str(matches.iloc[0][col_counterparty_used])[
+                                    :50]
                         concentration_risks[f"КРЕДИТ_{edrpou}"] = {
                             "edrpou": edrpou,
                             "name": name,
@@ -865,9 +892,11 @@ def analyze_statement(df: pd.DataFrame) -> dict:
                     elif share > 50:
                         name = ""
                         if col_counterparty_used:
-                            matches = df[df[col_edrpou_used].astype(str) == edrpou]
+                            matches = df[df[col_edrpou_used].astype(
+                                str) == edrpou]
                             if not matches.empty:
-                                name = str(matches.iloc[0][col_counterparty_used])[:50]
+                                name = str(matches.iloc[0][col_counterparty_used])[
+                                    :50]
                         concentration_risks[f"КРЕДИТ_MED_{edrpou}"] = {
                             "edrpou": edrpou,
                             "name": name,
@@ -879,7 +908,8 @@ def analyze_statement(df: pd.DataFrame) -> dict:
 
             # По витратах
             if total_debit > 0:
-                debit_by_edrpou = df.groupby(df[col_edrpou_used].astype(str))["_debit"].sum()
+                debit_by_edrpou = df.groupby(df[col_edrpou_used].astype(str))[
+                    "_debit"].sum()
                 for edrpou, amount in debit_by_edrpou.items():
                     if edrpou in ("nan", "", "0", "None"):
                         continue
@@ -887,9 +917,11 @@ def analyze_statement(df: pd.DataFrame) -> dict:
                     if share > 70:
                         name = ""
                         if col_counterparty_used:
-                            matches = df[df[col_edrpou_used].astype(str) == edrpou]
+                            matches = df[df[col_edrpou_used].astype(
+                                str) == edrpou]
                             if not matches.empty:
-                                name = str(matches.iloc[0][col_counterparty_used])[:50]
+                                name = str(matches.iloc[0][col_counterparty_used])[
+                                    :50]
                         concentration_risks[f"ДЕБЕТ_{edrpou}"] = {
                             "edrpou": edrpou,
                             "name": name,
@@ -904,20 +936,25 @@ def analyze_statement(df: pd.DataFrame) -> dict:
     # ── 5.8 Загальний ризик-скор ──────────────────────────────────────────
     # Базовий скор від субстанції (0–50 балів)
     max_substance_score = 50
-    substance_normalized = min(found_count / len(BUSINESS_CATEGORIES) * max_substance_score, max_substance_score)
+    substance_normalized = min(
+        found_count / len(BUSINESS_CATEGORIES) * max_substance_score, max_substance_score)
 
     # Штраф за призначення платежів
-    critical_payments = sum(1 for p in payment_risks if p["risk_level"] == "CRITICAL")
+    critical_payments = sum(
+        1 for p in payment_risks if p["risk_level"] == "CRITICAL")
     high_payments = sum(1 for p in payment_risks if p["risk_level"] == "HIGH")
-    medium_payments = sum(1 for p in payment_risks if p["risk_level"] == "MEDIUM")
+    medium_payments = sum(
+        1 for p in payment_risks if p["risk_level"] == "MEDIUM")
     total_rows = len(df)
     payment_penalty = min(
-        (critical_payments * 3 + high_payments * 2 + medium_payments * 1) / max(total_rows, 1) * 30,
+        (critical_payments * 3 + high_payments * 2 +
+         medium_payments * 1) / max(total_rows, 1) * 30,
         30
     )
 
     # Штраф за транзит
-    critical_transit = sum(1 for t in transit_risks if "Підозра" in t["risk_type"])
+    critical_transit = sum(
+        1 for t in transit_risks if "Підозра" in t["risk_type"])
     transit_penalty = min(critical_transit * 5, 15)
 
     # Штраф за концентрацію
@@ -925,7 +962,8 @@ def analyze_statement(df: pd.DataFrame) -> dict:
 
     # Фінальний скор (вищий = менше ризику)
     final_score = max(
-        substance_normalized - payment_penalty - transit_penalty - concentration_penalty,
+        substance_normalized - payment_penalty -
+        transit_penalty - concentration_penalty,
         0
     )
     results["overall_score"] = round(final_score, 1)
@@ -943,23 +981,29 @@ def analyze_statement(df: pd.DataFrame) -> dict:
     recommendations = []
 
     # Критичні відсутні категорії
-    critical_missing = ["🏢 Оренда та приміщення", "👷 Податки та заробітна плата"]
+    critical_missing = ["🏢 Оренда та приміщення",
+                        "👷 Податки та заробітна плата"]
     for cat in critical_missing:
         if cat in missing_categories:
             cat_key = cat.split(" ", 1)[1] if " " in cat else cat
             if "Оренда" in cat:
-                recommendations.append(BUSINESS_SCENARIOS.get("Відсутня оренда", {}))
+                recommendations.append(
+                    BUSINESS_SCENARIOS.get("Відсутня оренда", {}))
             elif "Податки" in cat:
-                recommendations.append(BUSINESS_SCENARIOS.get("Відсутня заробітна плата", {}))
+                recommendations.append(BUSINESS_SCENARIOS.get(
+                    "Відсутня заробітна плата", {}))
 
     if transit_risks:
-        recommendations.append(BUSINESS_SCENARIOS.get("Підозра на транзит", {}))
+        recommendations.append(
+            BUSINESS_SCENARIOS.get("Підозра на транзит", {}))
 
     if concentration_risks:
-        recommendations.append(BUSINESS_SCENARIOS.get("Висока концентрація на одному контрагенті", {}))
+        recommendations.append(BUSINESS_SCENARIOS.get(
+            "Висока концентрація на одному контрагенті", {}))
 
     if critical_payments > 0 or high_payments > 0:
-        recommendations.append(BUSINESS_SCENARIOS.get("Розмиті призначення платежів", {}))
+        recommendations.append(BUSINESS_SCENARIOS.get(
+            "Розмиті призначення платежів", {}))
 
     results["recommendations"] = recommendations
 
@@ -996,13 +1040,26 @@ def generate_pdf_report(results: dict, df: pd.DataFrame, filename: str = "audit_
             bottomMargin=2*cm,
         )
 
+        # 1. РЕЄСТРАЦІЯ КИРИЛИЧНОГО ШРИФТУ
+        try:
+            pdfmetrics.registerFont(TTFont('Arial_Cyrillic', 'arial.ttf'))
+            main_font = 'Arial_Cyrillic'
+        except Exception as e:
+            # Якщо файл arial.ttf не знайдено, використовуємо стандартний (будуть квадратики)
+            main_font = 'Helvetica'
+
         styles = getSampleStyleSheet()
 
-        # Визначення стилів
+        # Застосовуємо шрифт до всіх базових стилів
+        for style_name in styles.byName:
+            styles[style_name].fontName = main_font
+
+        # 2. ВИЗНАЧЕННЯ СТИЛІВ (із зазначенням шрифту та ЗМЕНШЕНИМ розміром)
         title_style = ParagraphStyle(
             "CustomTitle",
             parent=styles["Title"],
-            fontSize=16,
+            fontName=main_font,
+            fontSize=14,  # Було 16
             spaceAfter=12,
             textColor=colors.HexColor("#1a237e"),
             alignment=TA_CENTER,
@@ -1010,7 +1067,8 @@ def generate_pdf_report(results: dict, df: pd.DataFrame, filename: str = "audit_
         h1_style = ParagraphStyle(
             "H1Custom",
             parent=styles["Heading1"],
-            fontSize=13,
+            fontName=main_font,
+            fontSize=12,  # Було 13
             spaceBefore=12,
             spaceAfter=6,
             textColor=colors.HexColor("#283593"),
@@ -1018,7 +1076,8 @@ def generate_pdf_report(results: dict, df: pd.DataFrame, filename: str = "audit_
         h2_style = ParagraphStyle(
             "H2Custom",
             parent=styles["Heading2"],
-            fontSize=11,
+            fontName=main_font,
+            fontSize=10,  # Було 11
             spaceBefore=8,
             spaceAfter=4,
             textColor=colors.HexColor("#37474f"),
@@ -1026,13 +1085,15 @@ def generate_pdf_report(results: dict, df: pd.DataFrame, filename: str = "audit_
         body_style = ParagraphStyle(
             "BodyCustom",
             parent=styles["Normal"],
+            fontName=main_font,
             fontSize=9,
             spaceAfter=4,
-            leading=14,
+            leading=12,  # Зменшено міжрядковий інтервал (було 14)
         )
         warn_style = ParagraphStyle(
             "WarnStyle",
             parent=styles["Normal"],
+            fontName=main_font,
             fontSize=9,
             textColor=colors.HexColor("#b71c1c"),
             spaceAfter=3,
@@ -1040,6 +1101,7 @@ def generate_pdf_report(results: dict, df: pd.DataFrame, filename: str = "audit_
         ok_style = ParagraphStyle(
             "OkStyle",
             parent=styles["Normal"],
+            fontName=main_font,
             fontSize=9,
             textColor=colors.HexColor("#1b5e20"),
             spaceAfter=3,
@@ -1049,14 +1111,19 @@ def generate_pdf_report(results: dict, df: pd.DataFrame, filename: str = "audit_
         meta = results.get("meta", {})
         date_from = meta.get("Дата початку")
         date_to = meta.get("Дата кінця")
-        date_from_str = date_from.strftime("%d.%m.%Y") if pd.notna(date_from) else "н/д"
-        date_to_str = date_to.strftime("%d.%m.%Y") if pd.notna(date_to) else "н/д"
+        date_from_str = date_from.strftime(
+            "%d.%m.%Y") if pd.notna(date_from) else "н/д"
+        date_to_str = date_to.strftime(
+            "%d.%m.%Y") if pd.notna(date_to) else "н/д"
 
         # Заголовок
-        story.append(Paragraph("КОМПЛАЕНС-АУДИТ БАНКІВСЬКОЇ ВИПИСКИ", title_style))
-        story.append(Paragraph("Звіт фінансового моніторингу (Правила України 2026)", title_style))
+        story.append(
+            Paragraph("КОМПЛАЄНС-АУДИТ БАНКІВСЬКОЇ ВИПИСКИ", title_style))
+        story.append(
+            Paragraph("Звіт фінансового моніторингу (Правила України 2026)", title_style))
         story.append(Spacer(1, 0.3*cm))
-        story.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor("#1a237e")))
+        story.append(HRFlowable(width="100%", thickness=2,
+                     color=colors.HexColor("#1a237e")))
         story.append(Spacer(1, 0.3*cm))
 
         # Загальна інформація
@@ -1065,9 +1132,12 @@ def generate_pdf_report(results: dict, df: pd.DataFrame, filename: str = "audit_
             ["Параметр", "Значення"],
             ["Дата звіту", datetime.now().strftime("%d.%m.%Y %H:%M")],
             ["Аналізований період", f"{date_from_str} — {date_to_str}"],
-            ["Кількість транзакцій", str(meta.get("Кількість транзакцій", "н/д"))],
-            ["Загальні надходження", f"₴ {meta.get('Загальні надходження (Кредит)', 0):,.2f}"],
-            ["Загальні витрати", f"₴ {meta.get('Загальні витрати (Дебет)', 0):,.2f}"],
+            ["Кількість транзакцій", str(
+                meta.get("Кількість транзакцій", "н/д"))],
+            ["Загальні надходження",
+                f"₴ {meta.get('Загальні надходження (Кредит)', 0):,.2f}"],
+            ["Загальні витрати",
+                f"₴ {meta.get('Загальні витрати (Дебет)', 0):,.2f}"],
             ["Загальний ризик-рейтинг", results.get("overall_risk", "н/д")],
             ["Скор ризику (0–50)", str(results.get("overall_score", 0))],
         ]
@@ -1075,9 +1145,12 @@ def generate_pdf_report(results: dict, df: pd.DataFrame, filename: str = "audit_
         info_table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#283593")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            # Застосовуємо шрифт до таблиці
+            ("FONTNAME", (0, 0), (-1, -1), main_font),
             ("FONTSIZE", (0, 0), (-1, -1), 9),
             ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#e8eaf6")]),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+             [colors.white, colors.HexColor("#e8eaf6")]),
             ("ALIGN", (0, 0), (-1, -1), "LEFT"),
             ("LEFTPADDING", (0, 0), (-1, -1), 8),
             ("RIGHTPADDING", (0, 0), (-1, -1), 8),
@@ -1099,14 +1172,15 @@ def generate_pdf_report(results: dict, df: pd.DataFrame, filename: str = "audit_
 
         sub_data = [["Категорія", "Статус", "Знахідок"]]
         for cat_name, cat_data in results.get("business_substance", {}).items():
-            status = "✓ Знайдено" if cat_data["found"] else "✗ WARN"
-            color_flag = "found" if cat_data["found"] else "missing"
-            sub_data.append([cat_name, status, str(cat_data.get("matching_count", 0))])
+            status = "✓ Знайдено" if cat_data["found"] else "✗ УВАГА"
+            sub_data.append([cat_name, status, str(
+                cat_data.get("matching_count", 0))])
 
         sub_table = Table(sub_data, colWidths=[10*cm, 4*cm, 3*cm])
         sub_table_style = [
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#37474f")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, -1), main_font),  # Застосовуємо шрифт
             ("FONTSIZE", (0, 0), (-1, -1), 8),
             ("GRID", (0, 0), (-1, -1), 0.3, colors.grey),
             ("ALIGN", (1, 0), (-1, -1), "CENTER"),
@@ -1116,9 +1190,11 @@ def generate_pdf_report(results: dict, df: pd.DataFrame, filename: str = "audit_
         ]
         for i, (cat_name, cat_data) in enumerate(results.get("business_substance", {}).items(), 1):
             if not cat_data["found"]:
-                sub_table_style.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor("#ffebee")))
+                sub_table_style.append(
+                    ("BACKGROUND", (0, i), (-1, i), colors.HexColor("#ffebee")))
             elif i % 2 == 0:
-                sub_table_style.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor("#e8f5e9")))
+                sub_table_style.append(
+                    ("BACKGROUND", (0, i), (-1, i), colors.HexColor("#e8f5e9")))
         sub_table.setStyle(TableStyle(sub_table_style))
         story.append(sub_table)
         story.append(Spacer(1, 0.5*cm))
@@ -1127,11 +1203,15 @@ def generate_pdf_report(results: dict, df: pd.DataFrame, filename: str = "audit_
         story.append(Paragraph("3. АНАЛІЗ ПРИЗНАЧЕНЬ ПЛАТЕЖІВ", h1_style))
         payment_risks = results.get("payment_risks", [])
         if not payment_risks:
-            story.append(Paragraph("✅ Критичних проблем із призначеннями не виявлено", ok_style))
+            story.append(
+                Paragraph("✅ Критичних проблем із призначеннями не виявлено", ok_style))
         else:
-            critical_count = sum(1 for p in payment_risks if p["risk_level"] == "CRITICAL")
-            high_count = sum(1 for p in payment_risks if p["risk_level"] == "HIGH")
-            medium_count = sum(1 for p in payment_risks if p["risk_level"] == "MEDIUM")
+            critical_count = sum(
+                1 for p in payment_risks if p["risk_level"] == "CRITICAL")
+            high_count = sum(
+                1 for p in payment_risks if p["risk_level"] == "HIGH")
+            medium_count = sum(
+                1 for p in payment_risks if p["risk_level"] == "MEDIUM")
             story.append(Paragraph(
                 f"Знайдено проблем: Критичних — {critical_count}, Високих — {high_count}, Середніх — {medium_count}",
                 warn_style
@@ -1149,9 +1229,11 @@ def generate_pdf_report(results: dict, df: pd.DataFrame, filename: str = "audit_
             pr_table.setStyle(TableStyle([
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#b71c1c")),
                 ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, -1), main_font),  # Застосовуємо шрифт
                 ("FONTSIZE", (0, 0), (-1, -1), 7),
                 ("GRID", (0, 0), (-1, -1), 0.3, colors.grey),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#ffebee")]),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+                 [colors.white, colors.HexColor("#ffebee")]),
                 ("LEFTPADDING", (0, 0), (-1, -1), 4),
                 ("TOPPADDING", (0, 0), (-1, -1), 3),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
@@ -1165,9 +1247,11 @@ def generate_pdf_report(results: dict, df: pd.DataFrame, filename: str = "audit_
         story.append(Paragraph("4. АНАЛІЗ ТРАНЗИТНИХ ОПЕРАЦІЙ", h1_style))
         transit_risks = results.get("transit_risks", [])
         if not transit_risks:
-            story.append(Paragraph("✅ Ознак транзитних операцій не виявлено", ok_style))
+            story.append(
+                Paragraph("✅ Ознак транзитних операцій не виявлено", ok_style))
         else:
-            tr_data = [["Дата", "Надходження (К)", "Витрати (Д)", "Залишок", "Ризик"]]
+            tr_data = [
+                ["Дата", "Надходження (К)", "Витрати (Д)", "Залишок", "Ризик"]]
             for t in transit_risks[:20]:
                 tr_data.append([
                     t.get("date", "?"),
@@ -1176,13 +1260,16 @@ def generate_pdf_report(results: dict, df: pd.DataFrame, filename: str = "audit_
                     f"₴ {t.get('balance', 0):,.0f}",
                     t.get("risk_type", "")[:35],
                 ])
-            tr_table = Table(tr_data, colWidths=[2.5*cm, 3.5*cm, 3.5*cm, 3*cm, 5*cm])
+            tr_table = Table(tr_data, colWidths=[
+                             2.5*cm, 3.5*cm, 3.5*cm, 3*cm, 5*cm])
             tr_table.setStyle(TableStyle([
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e65100")),
                 ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, -1), main_font),  # Застосовуємо шрифт
                 ("FONTSIZE", (0, 0), (-1, -1), 8),
                 ("GRID", (0, 0), (-1, -1), 0.3, colors.grey),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#fff3e0")]),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+                 [colors.white, colors.HexColor("#fff3e0")]),
                 ("LEFTPADDING", (0, 0), (-1, -1), 5),
                 ("TOPPADDING", (0, 0), (-1, -1), 3),
             ]))
@@ -1192,10 +1279,12 @@ def generate_pdf_report(results: dict, df: pd.DataFrame, filename: str = "audit_
         story.append(PageBreak())
 
         # Концентрація
-        story.append(Paragraph("5. АНАЛІЗ КОНЦЕНТРАЦІЇ КОНТРАГЕНТІВ", h1_style))
+        story.append(
+            Paragraph("5. АНАЛІЗ КОНЦЕНТРАЦІЇ КОНТРАГЕНТІВ", h1_style))
         conc_risks = results.get("concentration_risks", {})
         if not conc_risks:
-            story.append(Paragraph("✅ Критичної концентрації не виявлено", ok_style))
+            story.append(
+                Paragraph("✅ Критичної концентрації не виявлено", ok_style))
         else:
             for key, risk in conc_risks.items():
                 story.append(Paragraph(
@@ -1212,13 +1301,15 @@ def generate_pdf_report(results: dict, df: pd.DataFrame, filename: str = "audit_
         story.append(Paragraph("6. БІЗНЕС-СЦЕНАРІЇ ТА РЕКОМЕНДАЦІЇ", h1_style))
         recs = results.get("recommendations", [])
         if not recs:
-            story.append(Paragraph("✅ Суттєвих проблем для рекомендацій не виявлено", ok_style))
+            story.append(
+                Paragraph("✅ Суттєвих проблем для рекомендацій не виявлено", ok_style))
         else:
             for rec in recs:
                 if not rec:
                     continue
                 story.append(Paragraph(f"▶ {rec.get('risk', '')}", h2_style))
-                story.append(Paragraph(f"Проблема: {rec.get('problem', '')}", body_style))
+                story.append(
+                    Paragraph(f"Проблема: {rec.get('problem', '')}", body_style))
                 for scenario in rec.get("scenarios", []):
                     story.append(Paragraph(f"  → {scenario}", body_style))
                 story.append(Paragraph(f"КПІ: {rec.get('kpi', '')}", ok_style))
@@ -1226,13 +1317,17 @@ def generate_pdf_report(results: dict, df: pd.DataFrame, filename: str = "audit_
 
         # Приклади правильних призначень
         story.append(PageBreak())
-        story.append(Paragraph("7. ПРИКЛАДИ ПРАВИЛЬНИХ ПРИЗНАЧЕНЬ ПЛАТЕЖІВ", h1_style))
-        for category, examples in CORRECT_PAYMENT_EXAMPLES.items():
-            story.append(Paragraph(category, h2_style))
-            for ex in examples:
-                style = warn_style if "❌" in category else ok_style
-                story.append(Paragraph(f"  • {ex}", style))
-            story.append(Spacer(1, 0.2*cm))
+        story.append(
+            Paragraph("7. ПРИКЛАДИ ПРАВИЛЬНИХ ПРИЗНАЧЕНЬ ПЛАТЕЖІВ", h1_style))
+
+        # Перевірка наявності CORRECT_PAYMENT_EXAMPLES
+        if 'CORRECT_PAYMENT_EXAMPLES' in globals():
+            for category, examples in CORRECT_PAYMENT_EXAMPLES.items():
+                story.append(Paragraph(category, h2_style))
+                for ex in examples:
+                    style = warn_style if "❌" in category else ok_style
+                    story.append(Paragraph(f"  • {ex}", style))
+                story.append(Spacer(1, 0.2*cm))
 
         # Будуємо PDF
         doc.build(story)
@@ -1243,10 +1338,10 @@ def generate_pdf_report(results: dict, df: pd.DataFrame, filename: str = "audit_
         # Якщо ReportLab не спрацював — повертаємо текстовий PDF-заглушку
         return f"Помилка генерації PDF: {str(e)}".encode("utf-8")
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # СЕКЦІЯ 7: STREAMLIT ІНТЕРФЕЙС
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def main():
     st.set_page_config(
@@ -1261,21 +1356,32 @@ def main():
     <style>
         .main-header {
             background: linear-gradient(135deg, #1a237e 0%, #283593 50%, #3949ab 100%);
-            color: white;
+            color: white; /* Тут белый оставляем, фон всегда темно-синий */
             padding: 20px 30px;
             border-radius: 12px;
             margin-bottom: 20px;
             text-align: center;
         }
-        .risk-critical { background: #ffebee; border-left: 5px solid #c62828; padding: 12px; border-radius: 5px; margin: 5px 0; }
-        .risk-high { background: #fff3e0; border-left: 5px solid #e65100; padding: 12px; border-radius: 5px; margin: 5px 0; }
-        .risk-medium { background: #fffde7; border-left: 5px solid #f9a825; padding: 12px; border-radius: 5px; margin: 5px 0; }
-        .risk-ok { background: #e8f5e9; border-left: 5px solid #2e7d32; padding: 12px; border-radius: 5px; margin: 5px 0; }
-        .metric-card { background: white; border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; text-align: center; }
-        .scenario-box { background: #e3f2fd; border-left: 4px solid #1976d2; padding: 15px; border-radius: 5px; margin: 10px 0; }
-        .example-good { background: #e8f5e9; border-left: 4px solid #388e3c; padding: 10px; border-radius: 5px; margin: 5px 0; font-family: monospace; font-size: 13px; }
-        .example-bad { background: #ffebee; border-left: 4px solid #c62828; padding: 10px; border-radius: 5px; margin: 5px 0; font-family: monospace; font-size: 13px; }
-        .warn-box { background: #fff8e1; border: 1px dashed #f9a825; border-radius: 5px; padding: 10px; margin: 5px 0; }
+        /* Добавлено color: black; чтобы текст не сливался в темной теме */
+        .risk-critical { background: #ffebee; color: black; border-left: 5px solid #c62828; padding: 12px; border-radius: 5px; margin: 5px 0; }
+        .risk-high { background: #fff3e0; color: black; border-left: 5px solid #e65100; padding: 12px; border-radius: 5px; margin: 5px 0; }
+        .risk-medium { background: #fffde7; color: black; border-left: 5px solid #f9a825; padding: 12px; border-radius: 5px; margin: 5px 0; }
+        .risk-ok { background: #e8f5e9; color: black; border-left: 5px solid #2e7d32; padding: 12px; border-radius: 5px; margin: 5px 0; }
+        
+        /* ИСПРАВЛЕНО: Умный фон, который подстраивается под светлую/темную тему Streamlit */
+        .metric-card { 
+            background: var(--secondary-background-color); 
+            color: var(--text-color);
+            border: 1px solid #e0e0e0; 
+            border-radius: 8px; 
+            padding: 15px; 
+            text-align: center; 
+        }
+        
+        .scenario-box { background: #e3f2fd; color: black; border-left: 4px solid #1976d2; padding: 15px; border-radius: 5px; margin: 10px 0; }
+        .example-good { background: #e8f5e9; color: black; border-left: 4px solid #388e3c; padding: 10px; border-radius: 5px; margin: 5px 0; font-family: monospace; font-size: 13px; }
+        .example-bad { background: #ffebee; color: black; border-left: 4px solid #c62828; padding: 10px; border-radius: 5px; margin: 5px 0; font-family: monospace; font-size: 13px; }
+        .warn-box { background: #fff8e1; color: black; border: 1px dashed #f9a825; border-radius: 5px; padding: 10px; margin: 5px 0; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -1339,15 +1445,18 @@ def main():
                 st.subheader(category)
                 for ex in examples:
                     if "❌" in category:
-                        st.markdown(f'<div class="example-bad">{ex}</div>', unsafe_allow_html=True)
+                        st.markdown(
+                            f'<div class="example-bad">{ex}</div>', unsafe_allow_html=True)
                     else:
-                        st.markdown(f'<div class="example-good">{ex}</div>', unsafe_allow_html=True)
+                        st.markdown(
+                            f'<div class="example-good">{ex}</div>', unsafe_allow_html=True)
         if st.button("✖️ Закрити приклади"):
             st.session_state["show_examples"] = False
 
     # Завантаження та аналіз файлу
     if uploaded_file is None:
-        st.info("👆 Завантажте файл банківської виписки у лівій панелі для початку аналізу")
+        st.info(
+            "👆 Завантажте файл банківської виписки у лівій панелі для початку аналізу")
 
         # Демо-режим
         col1, col2, col3 = st.columns(3)
@@ -1395,9 +1504,11 @@ def main():
             with st.expander(category):
                 for ex in examples:
                     if "❌" in category:
-                        st.markdown(f'<div class="example-bad">{ex}</div>', unsafe_allow_html=True)
+                        st.markdown(
+                            f'<div class="example-bad">{ex}</div>', unsafe_allow_html=True)
                     else:
-                        st.markdown(f'<div class="example-good">{ex}</div>', unsafe_allow_html=True)
+                        st.markdown(
+                            f'<div class="example-good">{ex}</div>', unsafe_allow_html=True)
         return
 
     # ── Читання файлу ─────────────────────────────────────────────────────────
@@ -1408,14 +1519,16 @@ def main():
                 for enc in ["utf-8", "cp1251", "cp1252", "latin-1"]:
                     try:
                         uploaded_file.seek(0)
-                        df = pd.read_csv(uploaded_file, encoding=enc, sep=None, engine="python")
+                        df = pd.read_csv(
+                            uploaded_file, encoding=enc, sep=None, engine="python")
                         break
                     except Exception:
                         continue
             else:
                 df = pd.read_excel(uploaded_file)
 
-        st.success(f"✅ Файл завантажено: {len(df)} рядків, {len(df.columns)} колонок")
+        st.success(
+            f"✅ Файл завантажено: {len(df)} рядків, {len(df.columns)} колонок")
 
         # Показуємо перші рядки
         with st.expander("🔍 Попередній перегляд даних (перші 5 рядків)"):
@@ -1452,7 +1565,8 @@ def main():
             f"Скор: {results.get('overall_score', 0)}/50",
         )
     with col2:
-        substance_count = sum(1 for v in results.get("business_substance", {}).values() if v["found"])
+        substance_count = sum(1 for v in results.get(
+            "business_substance", {}).values() if v["found"])
         total_cats = len(BUSINESS_CATEGORIES)
         st.metric(
             "🏢 Субстанція бізнесу",
@@ -1461,7 +1575,8 @@ def main():
         )
     with col3:
         payment_risks = results.get("payment_risks", [])
-        critical_p = sum(1 for p in payment_risks if p["risk_level"] == "CRITICAL")
+        critical_p = sum(
+            1 for p in payment_risks if p["risk_level"] == "CRITICAL")
         high_p = sum(1 for p in payment_risks if p["risk_level"] == "HIGH")
         st.metric(
             "📝 Ризики призначень",
@@ -1471,7 +1586,8 @@ def main():
         )
     with col4:
         transit_count = len(results.get("transit_risks", []))
-        critical_t = sum(1 for t in results.get("transit_risks", []) if "Підозра" in t.get("risk_type", ""))
+        critical_t = sum(1 for t in results.get(
+            "transit_risks", []) if "Підозра" in t.get("risk_type", ""))
         st.metric(
             "🔄 Транзит",
             f"{transit_count} дат з ризиком",
@@ -1490,16 +1606,19 @@ def main():
     # Фінансові метрики
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("💰 Загальні надходження", f"₴ {meta.get('Загальні надходження (Кредит)', 0):,.0f}")
+        st.metric("💰 Загальні надходження",
+                  f"₴ {meta.get('Загальні надходження (Кредит)', 0):,.0f}")
     with col2:
-        st.metric("💸 Загальні витрати", f"₴ {meta.get('Загальні витрати (Дебет)', 0):,.0f}")
+        st.metric("💸 Загальні витрати",
+                  f"₴ {meta.get('Загальні витрати (Дебет)', 0):,.0f}")
     with col3:
         st.metric("📋 Транзакцій", str(meta.get("Кількість транзакцій", 0)))
 
     # ── Маппінг колонок ──────────────────────────────────────────────────────
     with st.expander("🗺️ Виявлені колонки у файлі"):
         col_map = results.get("column_mapping", {})
-        cols_data = {"Параметр": list(col_map.keys()), "Знайдена колонка": list(col_map.values())}
+        cols_data = {"Параметр": list(
+            col_map.keys()), "Знайдена колонка": list(col_map.values())}
         df_cols = pd.DataFrame(cols_data)
         df_cols["Статус"] = df_cols["Знайдена колонка"].apply(
             lambda x: "✅ Знайдено" if x else "⚠️ Не знайдено"
@@ -1552,7 +1671,7 @@ def main():
                 weight_icon = "🔴" if cat_data["weight"] >= 3 else "🟡" if cat_data["weight"] == 2 else "⚪"
                 st.markdown(
                     f'<div class="risk-{"critical" if cat_data["weight"] >= 3 else "medium"}">'
-                    f'{weight_icon} <b>WARN: {cat_name}</b><br>'
+                    f'{weight_icon} <b>УВАГА: {cat_name}</b><br>'
                     f'<small>{cat_data["description"]}</small></div>',
                     unsafe_allow_html=True
                 )
@@ -1587,18 +1706,21 @@ def main():
                 p for p in payment_risks if p["risk_level"] == filter_level
             ]
 
-            st.info(f"Показано {len(filtered)} з {len(payment_risks)} проблемних записів")
+            st.info(
+                f"Показано {len(filtered)} з {len(payment_risks)} проблемних записів")
 
             # Статистика
             col1, col2, col3 = st.columns(3)
             with col1:
-                c = sum(1 for p in payment_risks if p["risk_level"] == "CRITICAL")
+                c = sum(
+                    1 for p in payment_risks if p["risk_level"] == "CRITICAL")
                 st.metric("⛔ Критичних", c)
             with col2:
                 h = sum(1 for p in payment_risks if p["risk_level"] == "HIGH")
                 st.metric("🔴 Високих", h)
             with col3:
-                m = sum(1 for p in payment_risks if p["risk_level"] == "MEDIUM")
+                m = sum(
+                    1 for p in payment_risks if p["risk_level"] == "MEDIUM")
                 st.metric("🟡 Середніх", m)
 
             # Таблиця
@@ -1639,7 +1761,8 @@ def main():
             </div>
             """, unsafe_allow_html=True)
         else:
-            st.warning(f"⚠️ Знайдено {len(transit_risks)} дат з підозрою на транзит")
+            st.warning(
+                f"⚠️ Знайдено {len(transit_risks)} дат з підозрою на транзит")
             st.markdown("""
             <div class="risk-critical">
                 <b>Що таке транзит?</b> Якщо в один день (або 24 години) сума надходжень (К)
@@ -1693,7 +1816,8 @@ def main():
                 st.subheader("Топ-10 контрагентів за оборотом")
                 group_df = df_analyzed.copy()
                 group_df["_total"] = group_df["_credit"] + group_df["_debit"]
-                top_contr = group_df.groupby(group_df[edrpou_col].astype(str))["_total"].sum().nlargest(10)
+                top_contr = group_df.groupby(group_df[edrpou_col].astype(str))[
+                    "_total"].sum().nlargest(10)
                 top_df = pd.DataFrame({
                     "ЄДРПОУ/ІПН": top_contr.index,
                     "Оборот (₴)": top_contr.values,
@@ -1709,11 +1833,13 @@ def main():
         missing_cats = results.get("missing_categories", [])
 
         if not recommendations and not missing_cats:
-            st.success("✅ Поточний стан виписки задовільний. Рекомендацій немає.")
+            st.success(
+                "✅ Поточний стан виписки задовільний. Рекомендацій немає.")
         else:
             # Персоналізовані сценарії
             if recommendations:
-                st.markdown("### 🎯 Персоналізовані рекомендації на основі вашої виписки")
+                st.markdown(
+                    "### 🎯 Персоналізовані рекомендації на основі вашої виписки")
                 for rec in recommendations:
                     if not rec:
                         continue
@@ -1752,9 +1878,11 @@ def main():
             st.markdown(f"#### {category}")
             for ex in examples:
                 if "❌" in category:
-                    st.markdown(f'<div class="example-bad">❌ {ex}</div>', unsafe_allow_html=True)
+                    st.markdown(
+                        f'<div class="example-bad">❌ {ex}</div>', unsafe_allow_html=True)
                 else:
-                    st.markdown(f'<div class="example-good">✅ {ex}</div>', unsafe_allow_html=True)
+                    st.markdown(
+                        f'<div class="example-good">✅ {ex}</div>', unsafe_allow_html=True)
             st.markdown("")
 
         # Шаблон для копіювання
@@ -1815,18 +1943,20 @@ def main():
                             {"Параметр": k, "Значення": str(v)}
                             for k, v in results["meta"].items()
                         ])
-                        meta_df.to_excel(writer, sheet_name="Загальна інфо", index=False)
+                        meta_df.to_excel(
+                            writer, sheet_name="Загальна інфо", index=False)
 
                         # Аркуш 2: Субстанція бізнесу
                         sub_rows = []
                         for cat, data in results["business_substance"].items():
                             sub_rows.append({
                                 "Категорія": cat,
-                                "Статус": "Знайдено" if data["found"] else "WARN - Не знайдено",
+                                "Статус": "Знайдено" if data["found"] else "УВАГА - Не знайдено",
                                 "Кількість платежів": data["matching_count"],
                                 "Опис": data["description"],
                             })
-                        pd.DataFrame(sub_rows).to_excel(writer, sheet_name="Субстанція бізнесу", index=False)
+                        pd.DataFrame(sub_rows).to_excel(
+                            writer, sheet_name="Субстанція бізнесу", index=False)
 
                         # Аркуш 3: Ризики призначень
                         if results["payment_risks"]:
