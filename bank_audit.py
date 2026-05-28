@@ -1511,33 +1511,43 @@ def main():
                             f'<div class="example-good">{ex}</div>', unsafe_allow_html=True)
         return
 
-    # ── Читання файлу ─────────────────────────────────────────────────────────
+ # ── Читання файлу (з автопошуком заголовків) ─────────────────────────────
     try:
-        with st.spinner("⏳ Читання файлу..."):
+        with st.spinner("⏳ Читання та аналіз структури файлу..."):
+            # Читаємо файл як сирий текст (без заголовків), щоб знайти де починаються дані
             if uploaded_file.name.endswith(".csv"):
-                # Спробуємо декілька кодувань
-                for enc in ["utf-8", "cp1251", "cp1252", "latin-1"]:
-                    try:
-                        uploaded_file.seek(0)
-                        df = pd.read_csv(
-                            uploaded_file, encoding=enc, sep=None, engine="python")
-                        break
-                    except Exception:
-                        continue
+                # Для CSV також можна використовувати такий підхід, але простіше через Excel
+                raw_df = pd.read_csv(uploaded_file, header=None, encoding='cp1251', sep=None, engine='python')
             else:
-                df = pd.read_excel(uploaded_file)
+                uploaded_file.seek(0)
+                raw_df = pd.read_excel(uploaded_file, header=None, dtype=str)
 
-        st.success(
-            f"✅ Файл завантажено: {len(df)} рядків, {len(df.columns)} колонок")
+            # АВТОПОИСК ЗАГОЛОВКА
+            # Шукаємо рядок, де є ключові слова (наприклад, "дата" і "сума")
+            header_row_index = -1
+            for index, row in raw_df.iterrows():
+                row_str = " ".join(row.astype(str).values).lower()
+                # Перевіряємо наявність обов'язкових колонок
+                if "дата" in row_str and ("сума" in row_str or "операції" in row_str):
+                    header_row_index = index
+                    break
+            
+            if header_row_index == -1:
+                st.error("❌ Не вдалося автоматично знайти початок таблиці. Перевірте, чи є в файлі колонки 'Дата' та 'Сума'.")
+                st.stop()
 
-        # Показуємо перші рядки
-        with st.expander("🔍 Попередній перегляд даних (перші 5 рядків)"):
-            st.dataframe(df.head(5), use_container_width=True)
+            # Тепер читаємо дані вже з правильного рядка
+            uploaded_file.seek(0)
+            df = pd.read_excel(uploaded_file, header=header_row_index)
+            
+            # Очистка імен колонок від зайвих пробілів/переносів
+            df.columns = [str(col).replace('\n', ' ').strip() for col in df.columns]
+
+        st.success(f"✅ Файл завантажено: {len(df)} рядків, {len(df.columns)} колонок")
 
     except Exception as e:
-        st.error(f"❌ Помилка читання файлу: {str(e)}")
-        st.info("Перевірте формат файлу та спробуйте ще раз")
-        return
+        st.error(f"Помилка при читанні файлу: {e}")
+        st.stop()
 
     # ── Запуск аналізу ────────────────────────────────────────────────────────
     with st.spinner("🔍 Виконується комплаенс-аналіз..."):
