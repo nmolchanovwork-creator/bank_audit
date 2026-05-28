@@ -1537,42 +1537,52 @@ def main():
                             f'<div class="example-good">{ex}</div>', unsafe_allow_html=True)
         return
 
- # ── Читання файлу (з автопошуком заголовків) ─────────────────────────────
+# ── Читання файлу (з автопошуком та нормалізацією) ───────────────────────
     try:
         with st.spinner("⏳ Читання та аналіз структури файлу..."):
-            # Читаємо файл як сирий текст (без заголовків), щоб знайти де починаються дані
-            if uploaded_file.name.endswith(".csv"):
-                # Для CSV також можна використовувати такий підхід, але простіше через Excel
-                raw_df = pd.read_csv(uploaded_file, header=None, encoding='cp1251', sep=None, engine='python')
-            else:
-                uploaded_file.seek(0)
-                raw_df = pd.read_excel(uploaded_file, header=None, dtype=str)
-
+            # 1. Читаємо файл як сирий текст для пошуку початку
+            uploaded_file.seek(0)
+            raw_df = pd.read_excel(uploaded_file, header=None, dtype=str)
+            
             # АВТОПОИСК ЗАГОЛОВКА
-            # Шукаємо рядок, де є ключові слова (наприклад, "дата" і "сума")
             header_row_index = -1
             for index, row in raw_df.iterrows():
                 row_str = " ".join(row.astype(str).values).lower()
-                # Перевіряємо наявність обов'язкових колонок
                 if "дата" in row_str and ("сума" in row_str or "операції" in row_str):
                     header_row_index = index
                     break
             
             if header_row_index == -1:
-                st.error("❌ Не вдалося автоматично знайти початок таблиці. Перевірте, чи є в файлі колонки 'Дата' та 'Сума'.")
+                st.error("❌ Не вдалося автоматично знайти заголовок таблиці.")
                 st.stop()
 
-            # Тепер читаємо дані вже з правильного рядка
+            # 2. Читаємо дані з правильного рядка
             uploaded_file.seek(0)
             df = pd.read_excel(uploaded_file, header=header_row_index)
             
-            # Очистка імен колонок від зайвих пробілів/переносів
+            # Очистка імен колонок
             df.columns = [str(col).replace('\n', ' ').strip() for col in df.columns]
+
+            # 3. Нормалізація колонок (перетворюємо банківські назви на наші date, amount, purpose)
+            df = normalize_dataframe(df)
+            
+            # 4. ПЕРЕВІРКА ТА ВИБІР КОЛОНОК
+            required = {"date": "Дата", "amount": "Сума", "purpose": "Призначення"}
+            
+            # Якщо якоїсь колонки немає — даємо вибрати вручну
+            for key, display_name in required.items():
+                if key not in df.columns:
+                    st.warning(f"⚠️ Не вдалося автоматично розпізнати колонку для: **{display_name}**")
+                    selected_col = st.selectbox(f"Виберіть колонку для {display_name}:", df.columns, key=f"select_{key}")
+                    df[key] = df[selected_col] # Присвоюємо обрану колонку нашому внутрішньому імені
+                else:
+                    # Якщо знайшли автоматично, просто переконуємось що там не порожньо
+                    df[key] = df[key]
 
         st.success(f"✅ Файл завантажено: {len(df)} рядків, {len(df.columns)} колонок")
 
     except Exception as e:
-        st.error(f"Помилка при читанні файлу: {e}")
+        st.error(f"Помилка при обробці файлу: {e}")
         st.stop()
 
     # ── Запуск аналізу ────────────────────────────────────────────────────────
