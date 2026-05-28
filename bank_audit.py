@@ -759,7 +759,7 @@ def analyze_statement(df: pd.DataFrame) -> dict:
     else:
         results["substance_risk"] = "🟢 Висока субстанція"
 
-    # ── 5.5 Б) Аналіз призначень платежів ────────────────────────────────
+ # ── 5.5 Б) Аналіз призначень платежів ────────────────────────────────
     REQUIRED_PATTERNS = [
         (r"рах(?:унок)?[\s.#№]*[\d\-/]+", "номер рахунку"),
         (r"рах\.?\s*№?\s*[\d\-/]+", "номер рахунку (скорочення)"),
@@ -786,17 +786,30 @@ def analyze_statement(df: pd.DataFrame) -> dict:
         r"матеріальна допомога.*без",
     ]
 
+    # Список внутрішніх переказів для ігнорування
+    INTERNAL_PATTERNS = [
+        r"переказ між власними рахунками",
+        r"переказ оборотніх коштів",
+        r"переказ грошей на рахунок у іншому банку",
+        r"власні кошти",
+        r"поповнення власного рахунку",
+        r"переказ прибутку"
+    ]
+
     payment_risks = []
     if col_purpose_used:
         for idx, row in df.iterrows():
-            purpose = str(row.get(col_purpose_used, "")
-                          ) if col_purpose_used else ""
-            counterparty = str(row.get(col_counterparty_used, "")
-                               ) if col_counterparty_used else ""
+            # Безпечне отримання значень
+            purpose = str(row.get(col_purpose_used, "") or "")
+            counterparty = str(row.get(col_counterparty_used, "") or "")
             amount = row.get("_debit", 0) + row.get("_credit", 0)
             norm_p = normalize_text(purpose)
 
-            # Перевірка на мінімальну довжину
+            # 1. Фільтрація внутрішніх переказів
+            if any(re.search(p, norm_p, re.IGNORECASE) for p in INTERNAL_PATTERNS):
+                continue
+
+            # 2. Перевірка на мінімальну довжину
             if len(norm_p) < 10:
                 payment_risks.append({
                     "row": idx + 2,
@@ -808,18 +821,12 @@ def analyze_statement(df: pd.DataFrame) -> dict:
                 })
                 continue
 
-            # Перевірка на розмиті фрази
-            is_blur = any(re.search(pattern, norm_p)
-                          for pattern in BLUR_PHRASES)
+            # 3. Аналіз за шаблонами (Regex)
+            is_blur = any(re.search(pattern, norm_p) for pattern in BLUR_PHRASES)
+            has_required = any(re.search(pattern, norm_p) for pattern, _ in REQUIRED_PATTERNS)
+            is_high_risk = any(re.search(pattern, norm_p) for pattern in HIGH_RISK_PHRASES)
 
-            # Перевірка наявності обов'язкових елементів
-            has_required = any(re.search(pattern, norm_p)
-                               for pattern, _ in REQUIRED_PATTERNS)
-
-            # Перевірка на високоризикові фрази
-            is_high_risk = any(re.search(pattern, norm_p)
-                               for pattern in HIGH_RISK_PHRASES)
-
+            # 4. Визначення рівня ризику
             if is_high_risk:
                 payment_risks.append({
                     "row": idx + 2,
@@ -849,7 +856,7 @@ def analyze_statement(df: pd.DataFrame) -> dict:
                 })
 
     results["payment_risks"] = payment_risks
-
+    
     # ── 5.6 В) Аналіз транзитних операцій ────────────────────────────────
     transit_risks = []
     if col_date and not df["_date"].isna().all():
