@@ -800,8 +800,8 @@ def analyze_statement(df: pd.DataFrame) -> dict:
     if col_purpose_used:
         for idx, row in df.iterrows():
             # Безпечне отримання значень
-            purpose = str(row.get(col_purpose_used, "") or "")
-            counterparty = str(row.get(col_counterparty_used, "") or "")
+            purpose = str(row[col_purpose_used]) if col_purpose_used in row else ""
+            counterparty = str(row[col_counterparty_used]) if col_counterparty_used in row else ""
             amount = row.get("_debit", 0) + row.get("_credit", 0)
             norm_p = normalize_text(purpose)
 
