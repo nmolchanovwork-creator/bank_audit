@@ -623,19 +623,49 @@ def analyze_statement(df: pd.DataFrame) -> dict:
     # ── 5.1 Виявлення колонок ──────────────────────────────────────────────
     col_date = find_column(
         df, ["дата", "date", "дата операції", "дата транзакції", "дата проведення"])
-    col_debit = find_column(df, ["дебет", "debit", "дебет (расход)",
-                            "витрати", "списання", "сума дебету", "дебет (витрати)"])
-    col_credit = find_column(df, ["кредит", "credit", "кредит (доход)",
-                             "надходження", "зарахування", "сума кредиту", "кредит (надходження)"])
+
+    col_debit = find_column(
+        df,
+        ["дебет", "debit", "дебет (расход)", "витрати",
+         "списання", "сума дебету", "дебет (витрати)"]
+    )
+
+    col_credit = find_column(
+        df,
+        ["кредит", "credit", "кредит (доход)",
+         "надходження", "зарахування",
+         "сума кредиту", "кредит (надходження)"]
+    )
+
     col_counterparty = find_column(
-        df, ["контрагент", "counterparty", "назва контрагента", "найменування", "отримувач/відправник", "назва"])
+        df,
+        ["контрагент", "counterparty", "назва контрагента",
+         "найменування", "отримувач/відправник", "назва"]
+    )
+
     col_edrpou = find_column(
-        df, ["окпо", "едрпоу", "єдрпоу", "инн", "іпн", "edrpou", "код контрагента", "код", "рнокпп"])
-    col_purpose = find_column(df, ["призначення", "назначение платежа",
-                              "призначення платежу", "purpose", "опис", "деталі", "коментар"])
-    col_amount = find_column(df, ["сума", "amount", "сума операції", "сумма"])
+        df,
+        ["окпо", "едрпоу", "єдрпоу", "инн", "іпн",
+         "edrpou", "код контрагента", "код", "рнокпп"]
+    )
+
+    col_purpose = find_column(
+        df,
+        ["призначення", "назначение платежа",
+         "призначення платежу", "purpose",
+         "опис", "деталі", "коментар"]
+    )
+
+    col_amount = find_column(
+        df,
+        ["сума", "amount", "сума операції", "сумма"]
+    )
+
     col_dk = find_column(
-        df, ["dk", "дк", "тип", "type", "ознака", "приход/расход", "д/к"])
+        df,
+        ["dk", "дк", "тип", "type",
+         "ознака", "приход/расход", "д/к"]
+    )
 
     results["column_mapping"] = {
         "Дата": col_date,
@@ -651,27 +681,54 @@ def analyze_statement(df: pd.DataFrame) -> dict:
     # ── 5.2 Стандартизація даних ──────────────────────────────────────────
     if col_date:
         df["_date"] = pd.to_datetime(
-            df[col_date], errors="coerce", dayfirst=True)
+            df[col_date],
+            errors="coerce",
+            dayfirst=True
+        )
     else:
         df["_date"] = pd.NaT
 
-    # Дебет (витрати)
+    # Дебет
     if col_debit:
         df["_debit"] = df[col_debit].apply(safe_float)
+
     elif col_amount and col_dk:
-        dk_series = df[col_dk].astype(str).str.lower().str.strip()
-        df["_debit"] = df[col_amount].apply(safe_float) * dk_series.isin(
-            ["д", "d", "дебет", "debit", "витрати", "расход", "-", "0"]).astype(float)
+        dk_series = (
+            df[col_dk]
+            .astype(str)
+            .str.lower()
+            .str.strip()
+        )
+
+        df["_debit"] = (
+            df[col_amount].apply(safe_float)
+            * dk_series.isin(
+                ["д", "d", "дебет", "debit",
+                 "витрати", "расход", "-", "0"]
+            ).astype(float)
+        )
     else:
         df["_debit"] = 0.0
 
-    # Кредит (надходження)
+    # Кредит
     if col_credit:
         df["_credit"] = df[col_credit].apply(safe_float)
+
     elif col_amount and col_dk:
-        dk_series = df[col_dk].astype(str).str.lower().str.strip()
-        df["_credit"] = df[col_amount].apply(safe_float) * dk_series.isin(
-            ["к", "k", "кредит", "credit", "надходження", "доход", "+", "1"]).astype(float)
+        dk_series = (
+            df[col_dk]
+            .astype(str)
+            .str.lower()
+            .str.strip()
+        )
+
+        df["_credit"] = (
+            df[col_amount].apply(safe_float)
+            * dk_series.isin(
+                ["к", "k", "кредит", "credit",
+                 "надходження", "доход", "+", "1"]
+            ).astype(float)
+        )
     else:
         df["_credit"] = 0.0
 
@@ -682,8 +739,10 @@ def analyze_statement(df: pd.DataFrame) -> dict:
     # ── 5.3 Загальна статистика ───────────────────────────────────────────
     total_debit = df["_debit"].sum()
     total_credit = df["_credit"].sum()
+
     date_min = df["_date"].min()
     date_max = df["_date"].max()
+
     row_count = len(df)
 
     results["meta"] = {
@@ -694,34 +753,66 @@ def analyze_statement(df: pd.DataFrame) -> dict:
         "Дата кінця": date_max,
     }
 
-    # ── 5.4 А) Аналіз господарської субстанції ─────────────────────────
+    # ── 5.4 Аналіз господарської субстанції ──────────────────────────────
     debit_purposes = []
+
     if col_purpose_used:
         debit_mask = df["_debit"] > 0
-        debit_purposes = df.loc[debit_mask, col_purpose_used].dropna().tolist()
+
+        debit_purposes = (
+            df.loc[debit_mask, col_purpose_used]
+            .dropna()
+            .astype(str)
+            .tolist()
+        )
 
     all_purposes = []
+
     if col_purpose_used:
-        all_purposes = df[col_purpose_used].dropna().tolist()
+        all_purposes = (
+            df[col_purpose_used]
+            .dropna()
+            .astype(str)
+            .tolist()
+        )
 
     substance_hits = {}
-    total_weight_possible = sum(cat["weight"]
-                                for cat in BUSINESS_CATEGORIES.values())
+
+    total_weight_possible = sum(
+        cat["weight"]
+        for cat in BUSINESS_CATEGORIES.values()
+    )
+
     weighted_score = 0
 
     for cat_name, cat_data in BUSINESS_CATEGORIES.items():
-        found_in_debit = any(keyword_match(
-            p, cat_data["keywords"]) for p in debit_purposes)
-        found_in_all = any(keyword_match(
-            p, cat_data["keywords"]) for p in all_purposes)
+
+        found_in_debit = any(
+            keyword_match(p, cat_data["keywords"])
+            for p in debit_purposes
+        )
+
+        found_in_all = any(
+            keyword_match(p, cat_data["keywords"])
+            for p in all_purposes
+        )
+
         found = found_in_debit or found_in_all
 
         matching_payments = []
+
         if col_purpose_used:
+
             for idx, row in df.iterrows():
-                purpose = str(row.get(col_purpose_used, "")
-                              ) if col_purpose_used else ""
-                hits = find_matching_keywords(purpose, cat_data["keywords"])
+
+                purpose_raw = row.get(col_purpose_used, "")
+                purpose = str(purpose_raw) if pd.notna(purpose_raw) else ""
+
+                hits = find_matching_keywords(
+                    purpose,
+                    cat_data["keywords"]
+                )
+
                 if hits:
                     matching_payments.append({
                         "row": idx,
@@ -743,23 +834,32 @@ def analyze_statement(df: pd.DataFrame) -> dict:
     results["business_substance"] = substance_hits
     results["substance_score"] = weighted_score
 
-    # Підрахунок категорій, де є знахідки
-    found_count = sum(1 for v in substance_hits.values() if v["found"])
+    found_count = sum(
+        1 for v in substance_hits.values()
+        if v["found"]
+    )
+
     missing_categories = [
-        k for k, v in substance_hits.items() if not v["found"]]
+        k for k, v in substance_hits.items()
+        if not v["found"]
+    ]
+
     results["missing_categories"] = missing_categories
 
     # Рейтинг субстанції
     if found_count <= 5:
         results["substance_risk"] = "🔴 Критично низька субстанція"
+
     elif found_count <= 12:
         results["substance_risk"] = "🟠 Низька субстанція"
+
     elif found_count <= 20:
         results["substance_risk"] = "🟡 Помірна субстанція"
+
     else:
         results["substance_risk"] = "🟢 Висока субстанція"
 
- # ── 5.5 Б) Аналіз призначень платежів ────────────────────────────────
+    # ── 5.5 Аналіз призначень платежів ───────────────────────────────────
     REQUIRED_PATTERNS = [
         (r"рах(?:унок)?[\s.#№]*[\d\-/]+", "номер рахунку"),
         (r"рах\.?\s*№?\s*[\d\-/]+", "номер рахунку (скорочення)"),
@@ -774,42 +874,23 @@ def analyze_statement(df: pd.DataFrame) -> dict:
     ]
 
     BLUR_PHRASES = [
-        r"^оплата за товар$", r"^за послуги$", r"^аванс$",
-        r"^оплата$", r"^розрахунок$", r"^за товар$",
-        r"^оплата послуги$", r"^оплата товарів$",
-        r"^перерахування коштів$", r"^перерахування$",
+        r"^оплата за товар$",
+        r"^за послуги$",
+        r"^аванс$",
+        r"^оплата$",
+        r"^розрахунок$",
+        r"^за товар$",
+        r"^оплата послуги$",
+        r"^оплата товарів$",
+        r"^перерахування коштів$",
+        r"^перерахування$",
     ]
 
     HIGH_RISK_PHRASES = [
-        r"виведення коштів", r"повернення поворотн",
-        r"нерозподілений прибуток", r"особисті кошти",
-        r"матеріальна допомога.*без",
-    ]
-
-  # ── 5.5 Б) Аналіз призначень платежів ────────────────────────────────
-    REQUIRED_PATTERNS = [
-        (r"рах(?:унок)?[\s.#№]*[\d\-/]+", "номер рахунку"),
-        (r"рах\.?\s*№?\s*[\d\-/]+", "номер рахунку (скорочення)"),
-        (r"дог(?:овір|овора)?[\s.#№]*[\d\-/]+", "номер договору"),
-        (r"дог\.?\s*№?\s*[\d\-/]+", "номер договору (скорочення)"),
-        (r"акт[\s.#№]*[\d\-/]+", "номер акта"),
-        (r"вн[\s.#№]*[\d\-/]+", "видаткова накладна"),
-        (r"видаткова накладна", "видаткова накладна (повна форма)"),
-        (r"№\s*[\d\-/]+", "будь-який номер документа"),
-        (r"\d{2}[./-]\d{2}[./-]\d{4}", "дата документа"),
-        (r"\d{2}[./-]\d{2}[./-]\d{2}(?!\d)", "дата документа (коротка)"),
-    ]
-
-    BLUR_PHRASES = [
-        r"^оплата за товар$", r"^за послуги$", r"^аванс$",
-        r"^оплата$", r"^розрахунок$", r"^за товар$",
-        r"^оплата послуги$", r"^оплата товарів$",
-        r"^перерахування коштів$", r"^перерахування$",
-    ]
-
-    HIGH_RISK_PHRASES = [
-        r"виведення коштів", r"повернення поворотн",
-        r"нерозподілений прибуток", r"особисті кошти",
+        r"виведення коштів",
+        r"повернення поворотн",
+        r"нерозподілений прибуток",
+        r"особисті кошти",
         r"матеріальна допомога.*без",
     ]
 
@@ -821,24 +902,55 @@ def analyze_statement(df: pd.DataFrame) -> dict:
         r"поповнення власного рахунку",
         r"переказ прибутку",
         r"покриття за проведені трансакції згідно договору еквайринга",
-        r"еквайринг"
+        r"еквайринг",
     ]
 
     payment_risks = []
+
     if col_purpose_used:
+
         for idx, row in df.iterrows():
-            # Безпечне отримання значень без помилки Series/Ambiguous
-            purpose = str(row[col_purpose_used]) if col_purpose_used in row and pd.notna(row[col_purpose_used]) else ""
-            counterparty = str(row[col_counterparty_used]) if col_counterparty_used in row and pd.notna(row[col_counterparty_used]) else ""
-            amount = (row["_debit"] if "_debit" in row else 0) + (row["_credit"] if "_credit" in row else 0)
+
+            # ── Безпечне отримання значень ────────────────────────────────
+            purpose_raw = row.get(col_purpose_used, "")
+            purpose = str(purpose_raw) if pd.notna(purpose_raw) else ""
+
+            counterparty = ""
+
+            if col_counterparty_used:
+                counterparty_raw = row.get(col_counterparty_used, "")
+
+                # ВИПРАВЛЕННЯ ПОМИЛКИ Series is ambiguous
+                if isinstance(counterparty_raw, pd.Series):
+                    counterparty_raw = counterparty_raw.iloc[0] \
+                        if not counterparty_raw.empty else ""
+
+                counterparty = (
+                    str(counterparty_raw)
+                    if pd.notna(counterparty_raw)
+                    else ""
+                )
+
+            debit_val = row.get("_debit", 0)
+            credit_val = row.get("_credit", 0)
+
+            debit_val = safe_float(debit_val)
+            credit_val = safe_float(credit_val)
+
+            amount = debit_val + credit_val
+
             norm_p = normalize_text(purpose)
 
-            # 1. Фільтрація внутрішніх переказів
-            if any(re.search(p, norm_p, re.IGNORECASE) for p in INTERNAL_PATTERNS):
+            # ── Фільтрація внутрішніх переказів ──────────────────────────
+            if any(
+                re.search(p, norm_p, re.IGNORECASE)
+                for p in INTERNAL_PATTERNS
+            ):
                 continue
 
-            # 2. Перевірка на мінімальну довжину
+            # ── Коротке призначення ──────────────────────────────────────
             if len(norm_p) < 10:
+
                 payment_risks.append({
                     "row": idx + 2,
                     "purpose": purpose[:120],
@@ -847,15 +959,28 @@ def analyze_statement(df: pd.DataFrame) -> dict:
                     "risk_type": "⛔ Порожнє/занадто коротке призначення",
                     "risk_level": "CRITICAL",
                 })
+
                 continue
 
-            # 3. Аналіз за шаблонами
-            is_blur = any(re.search(pattern, norm_p) for pattern in BLUR_PHRASES)
-            has_required = any(re.search(pattern, norm_p) for pattern, _ in REQUIRED_PATTERNS)
-            is_high_risk = any(re.search(pattern, norm_p) for pattern in HIGH_RISK_PHRASES)
+            # ── Аналіз шаблонів ──────────────────────────────────────────
+            is_blur = any(
+                re.search(pattern, norm_p)
+                for pattern in BLUR_PHRASES
+            )
 
-            # 4. Визначення рівня ризику
+            has_required = any(
+                re.search(pattern, norm_p)
+                for pattern, _ in REQUIRED_PATTERNS
+            )
+
+            is_high_risk = any(
+                re.search(pattern, norm_p)
+                for pattern in HIGH_RISK_PHRASES
+            )
+
+            # ── Визначення ризику ────────────────────────────────────────
             if is_high_risk:
+
                 payment_risks.append({
                     "row": idx + 2,
                     "purpose": purpose[:120],
@@ -864,7 +989,9 @@ def analyze_statement(df: pd.DataFrame) -> dict:
                     "risk_type": "🚨 Потенційно підозріла операція",
                     "risk_level": "CRITICAL",
                 })
+
             elif is_blur and not has_required:
+
                 payment_risks.append({
                     "row": idx + 2,
                     "purpose": purpose[:120],
@@ -873,7 +1000,9 @@ def analyze_statement(df: pd.DataFrame) -> dict:
                     "risk_type": "🔴 Розмите призначення (немає документів)",
                     "risk_level": "HIGH",
                 })
+
             elif not has_required:
+
                 payment_risks.append({
                     "row": idx + 2,
                     "purpose": purpose[:120],
@@ -884,35 +1013,53 @@ def analyze_statement(df: pd.DataFrame) -> dict:
                 })
 
     results["payment_risks"] = payment_risks
-    
-    # ── 5.6 В) Аналіз транзитних операцій ────────────────────────────────
+
+    # ── 5.6 Аналіз транзитних операцій ───────────────────────────────────
     transit_risks = []
+
     if col_date and "_date" in df.columns and not df["_date"].isna().all():
-        daily = df.groupby("_date").agg(
-            daily_debit=("_debit", "sum"),
-            daily_credit=("_credit", "sum"),
-        ).reset_index()
+
+        daily = (
+            df.groupby("_date")
+            .agg(
+                daily_debit=("_debit", "sum"),
+                daily_credit=("_credit", "sum"),
+            )
+            .reset_index()
+        )
 
         for _, drow in daily.iterrows():
+
             d = drow["daily_debit"]
             c = drow["daily_credit"]
+
             if d <= 0 or c <= 0:
                 continue
+
             balance_end = c - d
-            ratio = min(d, c) / max(d, c) if max(d, c) > 0 else 0
-            
+
+            ratio = (
+                min(d, c) / max(d, c)
+                if max(d, c) > 0 else 0
+            )
+
             if ratio >= 0.95 and abs(balance_end) < 0.05 * max(d, c):
+
                 transit_risks.append({
-                    "date": drow["_date"].strftime("%d.%m.%Y") if pd.notna(drow["_date"]) else "?",
+                    "date": drow["_date"].strftime("%d.%m.%Y")
+                    if pd.notna(drow["_date"]) else "?",
                     "credit": c,
                     "debit": d,
                     "balance": balance_end,
                     "ratio": ratio,
                     "risk_type": "🔴 Підозра на транзит (залишок ≈ 0, Д ≈ К)",
                 })
+
             elif ratio >= 0.85:
+
                 transit_risks.append({
-                    "date": drow["_date"].strftime("%d.%m.%Y") if pd.notna(drow["_date"]) else "?",
+                    "date": drow["_date"].strftime("%d.%m.%Y")
+                    if pd.notna(drow["_date"]) else "?",
                     "credit": c,
                     "debit": d,
                     "balance": balance_end,
@@ -922,26 +1069,44 @@ def analyze_statement(df: pd.DataFrame) -> dict:
 
     results["transit_risks"] = transit_risks
 
-    # ── 5.7 Г) Аналіз концентрації контрагентів ──────────────────────────
+    # ── 5.7 Аналіз концентрації контрагентів ─────────────────────────────
     concentration_risks = {}
-    if col_edrpou_used and total_credit > 0 or total_debit > 0:
+
+    if (col_edrpou_used and total_credit > 0) or total_debit > 0:
+
         if col_edrpou_used:
-            # По надходженнях
+
+            # Надходження
             if total_credit > 0:
-                credit_by_edrpou = df.groupby(df[col_edrpou_used].astype(str))[
-                    "_credit"].sum()
+
+                credit_by_edrpou = (
+                    df.groupby(df[col_edrpou_used].astype(str))
+                    ["_credit"]
+                    .sum()
+                )
+
                 for edrpou, amount in credit_by_edrpou.items():
+
                     if edrpou in ("nan", "", "0", "None"):
                         continue
+
                     share = amount / total_credit * 100
+
                     if share > 70:
+
                         name = ""
+
                         if col_counterparty_used:
-                            matches = df[df[col_edrpou_used].astype(
-                                str) == edrpou]
+
+                            matches = df[
+                                df[col_edrpou_used].astype(str) == edrpou
+                            ]
+
                             if not matches.empty:
-                                name = str(matches.iloc[0][col_counterparty_used])[
-                                    :50]
+                                name = str(
+                                    matches.iloc[0][col_counterparty_used]
+                                )[:50]
+
                         concentration_risks[f"КРЕДИТ_{edrpou}"] = {
                             "edrpou": edrpou,
                             "name": name,
@@ -950,14 +1115,22 @@ def analyze_statement(df: pd.DataFrame) -> dict:
                             "direction": "надходження",
                             "risk_type": "🔴 Критична залежність (>70% надходжень від 1 контрагента)",
                         }
+
                     elif share > 50:
+
                         name = ""
+
                         if col_counterparty_used:
-                            matches = df[df[col_edrpou_used].astype(
-                                str) == edrpou]
+
+                            matches = df[
+                                df[col_edrpou_used].astype(str) == edrpou
+                            ]
+
                             if not matches.empty:
-                                name = str(matches.iloc[0][col_counterparty_used])[
-                                    :50]
+                                name = str(
+                                    matches.iloc[0][col_counterparty_used]
+                                )[:50]
+
                         concentration_risks[f"КРЕДИТ_MED_{edrpou}"] = {
                             "edrpou": edrpou,
                             "name": name,
@@ -967,22 +1140,37 @@ def analyze_statement(df: pd.DataFrame) -> dict:
                             "risk_type": "🟡 Підвищена концентрація (>50% надходжень)",
                         }
 
-            # По витратах
+            # Витрати
             if total_debit > 0:
-                debit_by_edrpou = df.groupby(df[col_edrpou_used].astype(str))[
-                    "_debit"].sum()
+
+                debit_by_edrpou = (
+                    df.groupby(df[col_edrpou_used].astype(str))
+                    ["_debit"]
+                    .sum()
+                )
+
                 for edrpou, amount in debit_by_edrpou.items():
+
                     if edrpou in ("nan", "", "0", "None"):
                         continue
+
                     share = amount / total_debit * 100
+
                     if share > 70:
+
                         name = ""
+
                         if col_counterparty_used:
-                            matches = df[df[col_edrpou_used].astype(
-                                str) == edrpou]
+
+                            matches = df[
+                                df[col_edrpou_used].astype(str) == edrpou
+                            ]
+
                             if not matches.empty:
-                                name = str(matches.iloc[0][col_counterparty_used])[
-                                    :50]
+                                name = str(
+                                    matches.iloc[0][col_counterparty_used]
+                                )[:50]
+
                         concentration_risks[f"ДЕБЕТ_{edrpou}"] = {
                             "edrpou": edrpou,
                             "name": name,
@@ -994,82 +1182,132 @@ def analyze_statement(df: pd.DataFrame) -> dict:
 
     results["concentration_risks"] = concentration_risks
 
-    # ── 5.8 Загальний ризик-скор ──────────────────────────────────────────
-    # Базовий скор від субстанції (0–50 балів)
+    # ── 5.8 Загальний скор ───────────────────────────────────────────────
     max_substance_score = 50
-    substance_normalized = min(
-        found_count / len(BUSINESS_CATEGORIES) * max_substance_score, max_substance_score)
 
-    # Штраф за призначення платежів
+    substance_normalized = min(
+        found_count / len(BUSINESS_CATEGORIES) * max_substance_score,
+        max_substance_score
+    )
+
     critical_payments = sum(
-        1 for p in payment_risks if p["risk_level"] == "CRITICAL")
-    high_payments = sum(1 for p in payment_risks if p["risk_level"] == "HIGH")
+        1 for p in payment_risks
+        if p["risk_level"] == "CRITICAL"
+    )
+
+    high_payments = sum(
+        1 for p in payment_risks
+        if p["risk_level"] == "HIGH"
+    )
+
     medium_payments = sum(
-        1 for p in payment_risks if p["risk_level"] == "MEDIUM")
+        1 for p in payment_risks
+        if p["risk_level"] == "MEDIUM"
+    )
+
     total_rows = len(df)
+
     payment_penalty = min(
-        (critical_payments * 3 + high_payments * 2 +
-         medium_payments * 1) / max(total_rows, 1) * 30,
+        (
+            critical_payments * 3
+            + high_payments * 2
+            + medium_payments
+        ) / max(total_rows, 1) * 30,
         30
     )
 
-    # Штраф за транзит
     critical_transit = sum(
-        1 for t in transit_risks if "Підозра" in t["risk_type"])
-    transit_penalty = min(critical_transit * 5, 15)
+        1 for t in transit_risks
+        if "Підозра" in t["risk_type"]
+    )
 
-    # Штраф за концентрацію
-    concentration_penalty = min(len(concentration_risks) * 5, 10)
+    transit_penalty = min(
+        critical_transit * 5,
+        15
+    )
 
-    # Фінальний скор (вищий = менше ризику)
+    concentration_penalty = min(
+        len(concentration_risks) * 5,
+        10
+    )
+
     final_score = max(
-        substance_normalized - payment_penalty -
-        transit_penalty - concentration_penalty,
+        substance_normalized
+        - payment_penalty
+        - transit_penalty
+        - concentration_penalty,
         0
     )
+
     results["overall_score"] = round(final_score, 1)
 
     if final_score >= 35:
         results["overall_risk"] = "🟢 Низький ризик"
+
     elif final_score >= 20:
         results["overall_risk"] = "🟡 Середній ризик"
+
     elif final_score >= 10:
         results["overall_risk"] = "🟠 Підвищений ризик"
+
     else:
         results["overall_risk"] = "🔴 Критичний ризик"
 
     # ── 5.9 Рекомендації ─────────────────────────────────────────────────
     recommendations = []
 
-    # Критичні відсутні категорії
-    critical_missing = ["🏢 Оренда та приміщення",
-                        "👷 Податки та заробітна плата"]
+    critical_missing = [
+        "🏢 Оренда та приміщення",
+        "👷 Податки та заробітна плата"
+    ]
+
     for cat in critical_missing:
+
         if cat in missing_categories:
-            cat_key = cat.split(" ", 1)[1] if " " in cat else cat
+
             if "Оренда" in cat:
                 recommendations.append(
-                    BUSINESS_SCENARIOS.get("Відсутня оренда", {}))
+                    BUSINESS_SCENARIOS.get(
+                        "Відсутня оренда",
+                        {}
+                    )
+                )
+
             elif "Податки" in cat:
-                recommendations.append(BUSINESS_SCENARIOS.get(
-                    "Відсутня заробітна плата", {}))
+                recommendations.append(
+                    BUSINESS_SCENARIOS.get(
+                        "Відсутня заробітна плата",
+                        {}
+                    )
+                )
 
     if transit_risks:
         recommendations.append(
-            BUSINESS_SCENARIOS.get("Підозра на транзит", {}))
+            BUSINESS_SCENARIOS.get(
+                "Підозра на транзит",
+                {}
+            )
+        )
 
     if concentration_risks:
-        recommendations.append(BUSINESS_SCENARIOS.get(
-            "Висока концентрація на одному контрагенті", {}))
+        recommendations.append(
+            BUSINESS_SCENARIOS.get(
+                "Висока концентрація на одному контрагенті",
+                {}
+            )
+        )
 
     if critical_payments > 0 or high_payments > 0:
-        recommendations.append(BUSINESS_SCENARIOS.get(
-            "Розмиті призначення платежів", {}))
+        recommendations.append(
+            BUSINESS_SCENARIOS.get(
+                "Розмиті призначення платежів",
+                {}
+            )
+        )
 
     results["recommendations"] = recommendations
 
     return results, df
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # СЕКЦІЯ 6: ГЕНЕРАЦІЯ PDF-ЗВІТУ
