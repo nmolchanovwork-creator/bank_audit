@@ -34,6 +34,32 @@ warnings.filterwarnings("ignore")
 # Кожна категорія — повний набір ключових слів, скорочень та варіантів написання
 # ─────────────────────────────────────────────────────────────────────────────
 
+def normalize_dataframe(df):
+    """
+    Приводить різні назви колонок до єдиного стандарту, який розуміє скрипт.
+    """
+    # Словник: {наша_назва: [список_варіантів_з_банків]}
+    mapping = {
+        "date": ["дата", "дата операції", "date"],
+        "purpose": ["призначення", "деталі операції", "назначение платежа", "опис"],
+        "counterparty": ["контрагент", "отримувач", "платник"],
+        "edrpou": ["єдрпоу", "окпо", "код", "ідентифікатор"],
+        "iban": ["iban", "рахунок", "номер рахунку"],
+        "amount": ["сума", "сума в валюті рахунку", "сума операції", "сума (дебет/кредит)"]
+    }
+    
+    rename_map = {}
+    for col in df.columns:
+        col_clean = str(col).lower().replace('\n', ' ').strip()
+        for standard_name, variants in mapping.items():
+            if any(v in col_clean for v in variants):
+                rename_map[col] = standard_name
+                break
+    
+    df = df.rename(columns=rename_map)
+    return df
+
+
 BUSINESS_CATEGORIES = {
     "🏢 Оренда та приміщення": {
         "description": "Підтвердження наявності офісу, складу, виробництва або торгової точки",
